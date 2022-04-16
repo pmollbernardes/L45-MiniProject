@@ -4,7 +4,7 @@ from torch_geometric.nn import MessagePassing
 from torch_scatter import scatter
 
 
-class MPNNLayer(MessagePassing):
+class InvariantLayer(MessagePassing):
     def __init__(self, emb_dim=64, edge_dim=4, aggr='add'):
         """Message Passing Neural Network Layer
 

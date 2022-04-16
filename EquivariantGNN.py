@@ -1,12 +1,16 @@
 import torch
 from torch.nn import Linear, Module
-from torch_geometric.nn import MessagePassing, global_mean_pool
-from MPNNLayer import MPNNLayer
+from EquivariantLayer import EquivariantLayer
+from torch_geometric.nn import global_mean_pool
 
 
-class MPNNModel(Module):
+class EquivariantGNN(Module):
     def __init__(self, num_layers=4, emb_dim=64, in_dim=11, edge_dim=4, out_dim=1):
         """Message Passing Neural Network model for graph property prediction
+
+        This model uses both node features and coordinates as inputs, and
+        is invariant to 3D rotations and translations (the constituent MPNN layers
+        are equivariant to 3D rotations and translations).
 
         Args:
             num_layers: (int) - number of message passing layers `L`
@@ -24,7 +28,8 @@ class MPNNModel(Module):
         # Stack of MPNN layers
         self.convs = torch.nn.ModuleList()
         for layer in range(num_layers):
-            self.convs.append(MPNNLayer(emb_dim, edge_dim, aggr='add'))
+            self.convs.append(EquivariantLayer(
+                emb_dim, edge_dim, aggr='add'))
 
         # Linear prediction head
         # dim: d -> out_dim
@@ -39,12 +44,28 @@ class MPNNModel(Module):
             out: (batch_size, out_dim) - prediction for each graph
         """
         h = self.lin_in(data.x)  # (n, d_n) -> (n, d)
+        pos = data.pos
 
         for conv in self.convs:
-            # (n, d) -> (n, d)
-            h = h + conv(h, data.edge_index, data.edge_attr)
+            # Message passing layer
+            h_update, pos_update = conv(
+                h, pos, data.edge_index, data.edge_attr)
+
+            # Update node features
+            h = h + h_update  # (n, d) -> (n, d)
             # Note that we add a residual connection after each MPNN layer
+
+            # Update node coordinates
+            pos = pos_update  # (n, 3) -> (n, 3)
 
         out = self.lin_pred(h)  # (batch_size, d) -> (batch_size, 1)
 
         return out
+
+    def reset_parameters(self):
+        for module in self.children():
+            if hasattr(module, 'reset_parameters'):
+                module.reset_parameters()
+            elif isinstance(module, torch.nn.ModuleList):
+                for layer in module.children():
+                    layer.reset_parameters()
