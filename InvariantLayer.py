@@ -96,3 +96,12 @@ class InvariantLayer(MessagePassing):
 
     def __repr__(self) -> str:
         return (f'{self.__class__.__name__}(emb_dim={self.emb_dim}, aggr={self.aggr})')
+
+    def reset_parameters(self):
+        for module in self.children():
+            if hasattr(module, 'reset_parameters'):
+                module.reset_parameters()
+            elif isinstance(module, torch.nn.Sequential):
+                for submodule in module:
+                    if hasattr(submodule, 'reset_parameters'):
+                        submodule.reset_parameters()

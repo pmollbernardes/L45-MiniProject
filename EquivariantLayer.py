@@ -5,7 +5,7 @@ from torch_scatter import scatter
 
 
 class EquivariantLayer(MessagePassing):
-    def __init__(self, emb_dim=64, edge_dim=4, aggr='add'):
+    def __init__(self, emb_dim=64, edge_dim=4, aggr='add', interaction_aggr='mean'):
         """Message Passing Neural Network Layer
 
         This layer is equivariant to 3D rotations and translations.
@@ -14,9 +14,11 @@ class EquivariantLayer(MessagePassing):
             emb_dim: (int) - hidden dimension `d`
             edge_dim: (int) - edge feature dimension `d_e`
             aggr: (str) - aggregation function `\oplus` (sum/mean/max)
+            interaction_aggr: (str) - aggregation function for position interactions (sum/mean/max)
         """
         # Set the aggregation function
         super().__init__(aggr=aggr)
+        self.interaction_aggr = interaction_aggr
 
         self.emb_dim = emb_dim
         self.edge_dim = edge_dim
@@ -30,7 +32,7 @@ class EquivariantLayer(MessagePassing):
             Linear(2*emb_dim, emb_dim), BatchNorm1d(emb_dim), ReLU(),
             Linear(emb_dim, emb_dim), BatchNorm1d(emb_dim), ReLU()
         )
-        self.mlp_interatomic_force = Sequential(
+        self.mlp_position_upd = Sequential(
             Linear(2*emb_dim + edge_dim + 1,
                    emb_dim), BatchNorm1d(emb_dim), ReLU(),
             Linear(emb_dim, 1), BatchNorm1d(1), ReLU()
@@ -70,8 +72,8 @@ class EquivariantLayer(MessagePassing):
         dist = torch.norm(pos_i - pos_j, dim=1).reshape(-1, 1)
         msg = torch.cat([h_i, h_j, edge_attr, dist], dim=-1)
 
-        # Compute the strength of interatomic interactions
-        force_scalar = self.mlp_interatomic_force(msg)
+        # Compute the strength of position interactions
+        force_scalar = self.mlp_position_upd(msg)
         # Get direction of interactions
         force_direction = pos_j - pos_i
         # Normalize direction vectors
@@ -93,7 +95,8 @@ class EquivariantLayer(MessagePassing):
             aggr_out: ((n, d), (n, 3)) - aggregated messages and position updates
         """
         aggr_h = scatter(inputs[0], index, dim=self.node_dim, reduce=self.aggr)
-        aggr_x = scatter(inputs[1], index, dim=self.node_dim, reduce='mean')
+        aggr_x = scatter(inputs[1], index, dim=self.node_dim,
+                         reduce=self.interaction_aggr)
         return aggr_h, aggr_x
 
     def update(self, aggr_out, h, pos):

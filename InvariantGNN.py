@@ -48,3 +48,11 @@ class InvariantGNN(Module):
         out = self.lin_pred(h)  # (batch_size, d) -> (batch_size, 1)
 
         return out
+
+    def reset_parameters(self):
+        for module in self.children():
+            if hasattr(module, 'reset_parameters'):
+                module.reset_parameters()
+            elif isinstance(module, torch.nn.ModuleList):
+                for layer in module.children():
+                    layer.reset_parameters()
