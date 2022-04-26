@@ -15,6 +15,7 @@ class EquivariantLayer(MessagePassing):
             edge_dim: (int) - edge feature dimension `d_e`
             aggr: (str) - aggregation function `\oplus` (sum/mean/max)
             interaction_aggr: (str) - aggregation function for position interactions (sum/mean/max)
+            orthogonal_interactions: (bool) - If True, orthogonal position updates will be applied
         """
         # Set the aggregation function
         super().__init__(aggr=aggr)
@@ -38,7 +39,7 @@ class EquivariantLayer(MessagePassing):
                    emb_dim), BatchNorm1d(emb_dim), ReLU(),
             Linear(emb_dim, 1), BatchNorm1d(1), ReLU()
         )
-        self.mlp_position_upd_normal = Sequential(
+        self.mlp_position_upd_ortho = Sequential(
             Linear(2*emb_dim + edge_dim + 1,
                    emb_dim), BatchNorm1d(emb_dim), ReLU(),
             Linear(emb_dim, 1), BatchNorm1d(1), ReLU()
@@ -85,7 +86,7 @@ class EquivariantLayer(MessagePassing):
         # Compute the strength of position interactions
         force_scalar = self.mlp_position_upd(msg)
         if self.orthogonal_interactions:
-            force_scalar_normal = self.mlp_position_upd_normal(msg)
+            force_scalar_ortho = self.mlp_position_upd_ortho(msg)
         # Get direction of interactions
         force_direction = pos_j - pos_i
         # Normalize direction vectors
@@ -96,7 +97,7 @@ class EquivariantLayer(MessagePassing):
         # Get interatomic force vectors
         if self.orthogonal_interactions:
             force_vector = force_scalar * force_direction + \
-                force_scalar_normal * orthogonal_direction
+                force_scalar_ortho * orthogonal_direction
         else:
             force_vector = force_scalar * force_direction
         return self.mlp_msg(msg), force_vector
@@ -108,11 +109,11 @@ class EquivariantLayer(MessagePassing):
         Args:
             inputs: ((e, d) (e, d)) - tuple of messages `m_ij` from destination to source nodes
             index: (e, 1) - list of source nodes for each edge/message in `input`
-
+            n_nodes: - total number of nodes. Batches from NeighborLoader can have nodes
+                       with no incoming edges, so scatter() needs to know the dim_size
         Returns:
             aggr_out: ((n, d), (n, 3)) - aggregated messages and position updates
         """
-        # print(n_nodes, index)
         aggr_h = scatter(inputs[0], index, dim=self.node_dim,
                          reduce=self.aggr, dim_size=n_nodes)
         aggr_x = scatter(inputs[1], index, dim=self.node_dim,

@@ -1,6 +1,6 @@
 import torch
 from torch.nn import Linear, Module
-from EquivariantLayer import EquivariantLayer
+from models.EquivariantLayer import EquivariantLayer
 from torch_geometric.nn import global_mean_pool
 
 

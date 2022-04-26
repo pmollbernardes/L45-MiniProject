@@ -1,9 +1,10 @@
 import torch
 from torch.nn import Linear, Sequential, BatchNorm1d, ReLU
 from torch_scatter import scatter
+from torch_geometric.nn import MessagePassing
 
 
-class MPNNLayer(torch.nn.Module):
+class MPNNLayer(MessagePassing):
     def __init__(self, emb_dim=64, edge_dim=4, aggr='add'):
         """Message Passing Neural Network Layer
 
@@ -91,3 +92,12 @@ class MPNNLayer(torch.nn.Module):
 
     def __repr__(self) -> str:
         return (f'{self.__class__.__name__}(emb_dim={self.emb_dim}, aggr={self.aggr})')
+
+    def reset_parameters(self):
+        for module in self.children():
+            if hasattr(module, 'reset_parameters'):
+                module.reset_parameters()
+            elif isinstance(module, torch.nn.Sequential):
+                for submodule in module:
+                    if hasattr(submodule, 'reset_parameters'):
+                        submodule.reset_parameters()
