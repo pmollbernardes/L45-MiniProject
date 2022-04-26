@@ -5,7 +5,7 @@ from torch_geometric.nn import global_mean_pool
 
 
 class EquivariantGNN(Module):
-    def __init__(self, num_layers=4, emb_dim=64, in_dim=11, edge_dim=4, out_dim=1, pos_aggr='mean'):
+    def __init__(self, num_layers=4, emb_dim=64, in_dim=11, edge_dim=4, out_dim=1, pos_aggr='mean', orthogonal_interactions=False):
         """Message Passing Neural Network model for graph property prediction
 
         This model uses both node features and coordinates as inputs, and
@@ -29,7 +29,7 @@ class EquivariantGNN(Module):
         self.convs = torch.nn.ModuleList()
         for layer in range(num_layers):
             self.convs.append(EquivariantLayer(
-                emb_dim, edge_dim, aggr='add', interaction_aggr=pos_aggr))
+                emb_dim, edge_dim, aggr='add', interaction_aggr=pos_aggr, orthogonal_interactions=orthogonal_interactions))
 
         # Linear prediction head
         # dim: d -> out_dim

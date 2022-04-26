@@ -5,7 +5,7 @@ from torch_scatter import scatter
 
 
 class EquivariantLayer(MessagePassing):
-    def __init__(self, emb_dim=64, edge_dim=4, aggr='add', interaction_aggr='mean'):
+    def __init__(self, emb_dim=64, edge_dim=4, aggr='add', interaction_aggr='mean', orthogonal_interactions=False):
         """Message Passing Neural Network Layer
 
         This layer is equivariant to 3D rotations and translations.
@@ -19,6 +19,7 @@ class EquivariantLayer(MessagePassing):
         # Set the aggregation function
         super().__init__(aggr=aggr)
         self.interaction_aggr = interaction_aggr
+        self.orthogonal_interactions = orthogonal_interactions
 
         self.emb_dim = emb_dim
         self.edge_dim = edge_dim
@@ -37,6 +38,11 @@ class EquivariantLayer(MessagePassing):
                    emb_dim), BatchNorm1d(emb_dim), ReLU(),
             Linear(emb_dim, 1), BatchNorm1d(1), ReLU()
         )
+        self.mlp_position_upd_normal = Sequential(
+            Linear(2*emb_dim + edge_dim + 1,
+                   emb_dim), BatchNorm1d(emb_dim), ReLU(),
+            Linear(emb_dim, 1), BatchNorm1d(1), ReLU()
+        )
 
     def forward(self, h, pos, edge_index, edge_attr):
         """
@@ -51,7 +57,8 @@ class EquivariantLayer(MessagePassing):
         Returns:
             out: [(n, d),(n,3)] - updated node features
         """
-        out = self.propagate(edge_index, h=h, edge_attr=edge_attr, pos=pos)
+        out = self.propagate(
+            edge_index, h=h, edge_attr=edge_attr, pos=pos, n_nodes=h.shape[0])
         return out
 
     def message(self, h_i, h_j, edge_attr, pos_i, pos_j):
@@ -70,20 +77,31 @@ class EquivariantLayer(MessagePassing):
                                     "interatomic force" vector for each edge
         """
         dist = torch.norm(pos_i - pos_j, dim=1).reshape(-1, 1)
-        msg = torch.cat([h_i, h_j, edge_attr, dist], dim=-1)
+        if self.edge_dim:
+            msg = torch.cat([h_i, h_j, edge_attr, dist], dim=-1)
+        else:
+            msg = torch.cat([h_i, h_j, dist], dim=-1)
 
         # Compute the strength of position interactions
         force_scalar = self.mlp_position_upd(msg)
+        if self.orthogonal_interactions:
+            force_scalar_normal = self.mlp_position_upd_normal(msg)
         # Get direction of interactions
         force_direction = pos_j - pos_i
         # Normalize direction vectors
         force_direction = (force_direction / dist)
+        if self.orthogonal_interactions:
+            orthogonal_direction = torch.matmul(
+                force_direction, torch.tensor([[0., -1.], [1., 0.]]))
         # Get interatomic force vectors
-        force_vector = force_scalar * force_direction
-
+        if self.orthogonal_interactions:
+            force_vector = force_scalar * force_direction + \
+                force_scalar_normal * orthogonal_direction
+        else:
+            force_vector = force_scalar * force_direction
         return self.mlp_msg(msg), force_vector
 
-    def aggregate(self, inputs, index):
+    def aggregate(self, inputs, index, n_nodes):
         """The `aggregate` function aggregates the messages from neighboring nodes,
         according to the chosen aggregation function ('sum' by default).
 
@@ -94,9 +112,11 @@ class EquivariantLayer(MessagePassing):
         Returns:
             aggr_out: ((n, d), (n, 3)) - aggregated messages and position updates
         """
-        aggr_h = scatter(inputs[0], index, dim=self.node_dim, reduce=self.aggr)
+        # print(n_nodes, index)
+        aggr_h = scatter(inputs[0], index, dim=self.node_dim,
+                         reduce=self.aggr, dim_size=n_nodes)
         aggr_x = scatter(inputs[1], index, dim=self.node_dim,
-                         reduce=self.interaction_aggr)
+                         reduce=self.interaction_aggr, dim_size=n_nodes)
         return aggr_h, aggr_x
 
     def update(self, aggr_out, h, pos):
@@ -112,6 +132,7 @@ class EquivariantLayer(MessagePassing):
                                         updated node coordinates
         """
         aggr_h, aggr_x = aggr_out
+        # print(h.shape, aggr_h.shape)
         h_upd_out = torch.cat([h, aggr_h], dim=-1)
         x_upd_out = pos + aggr_x
         return self.mlp_upd(h_upd_out), x_upd_out
